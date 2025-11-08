@@ -3,141 +3,88 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import numpy as np
+from tensordict import TensorDict
+from torchrl.data import ReplayBuffer, LazyMemmapStorage, RandomSampler
 
+# Hyperparameters
+learning_rate = 0.0005
+gamma = 0.98
+buffer_limit = 50000
+batch_size = 32
 
-class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, fc1_dims, fc2_dims,
-                 n_actions):
-        super(DeepQNetwork, self).__init__()
-        self.input_dims = input_dims
-        self.fc1_dims = fc1_dims
-        self.fc2_dims = fc2_dims
-        self.n_actions = n_actions
-        self.fc1 = nn.Linear(*self.input_dims, self.fc1_dims)
-        self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-        self.fc3 = nn.Linear(self.fc2_dims, self.n_actions)
+class Qnet(nn.Module):
+    def __init__(self):
+        super(Qnet, self).__init__()
+        self.fc1 = nn.Linear(4, 128)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, 2)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr)
-        self.loss = nn.MSELoss()
-        self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
-        self.to(self.device)
-
-    def forward(self, state):
-        x = F.relu(self.fc1(state))
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        actions = self.fc3(x)
+        return self.fc3(x)
 
-        return actions
+    def sample_action(self, obs, eps):
+        out = self.forward(obs)
+        coin = T.rand(())
+        return (T.randint(0, 2, ()).item() if coin < eps else out.argmax().item())
 
+def train(q, q_target, memory, optimizer):
+    for i in range(10):
+        batch = memory.sample(batch_size).apply(
+            lambda x: x.unsqueeze(1) if x.ndim == 1 else x
+        )
 
-class Agent:
-    def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
-                 max_mem_size=100000, eps_end=0.05, eps_dec=5e-4):
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.eps_min = eps_end
-        self.eps_dec = eps_dec
-        self.lr = lr
-        self.action_space = [i for i in range(n_actions)]
-        self.mem_size = max_mem_size
-        self.batch_size = batch_size
-        self.mem_cntr = 0
-        self.iter_cntr = 0
-        self.replace_target = 100
+        q_out = q(batch["s"])
+        q_a = q_out.gather(1, batch["a"])
+        max_q_prime = q_target(batch["s_prime"]).max(1, True)[0]
+        target = batch["r"] + gamma * max_q_prime * batch["done"]
+        loss = F.smooth_l1_loss(q_a, target)
 
-        self.Q_eval = DeepQNetwork(lr, n_actions=n_actions,
-                                   input_dims=input_dims,
-                                   fc1_dims=256, fc2_dims=256)
-        self.state_memory = np.zeros((self.mem_size, *input_dims),
-                                     dtype=np.float32)
-        self.new_state_memory = np.zeros((self.mem_size, *input_dims),
-                                         dtype=np.float32)
-        self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
-        self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
-        self.terminal_memory = np.zeros(self.mem_size, dtype=np.bool)
-
-    def store_transition(self, state, action, reward, state_, terminal):
-        index = self.mem_cntr % self.mem_size
-        self.state_memory[index] = state
-        self.new_state_memory[index] = state_
-        self.reward_memory[index] = reward
-        self.action_memory[index] = action
-        self.terminal_memory[index] = terminal
-
-        self.mem_cntr += 1
-
-    def choose_action(self, observation):
-        if np.random.random() > self.epsilon:
-            state = T.tensor([observation]).to(self.Q_eval.device)
-            actions = self.Q_eval.forward(state)
-            action = T.argmax(actions).item()
-        else:
-            action = np.random.choice(self.action_space)
-
-        return action
-
-    def learn(self):
-        if self.mem_cntr < self.batch_size:
-            return
-
-        self.Q_eval.optimizer.zero_grad()
-
-        max_mem = min(self.mem_cntr, self.mem_size)
-
-        batch = np.random.choice(max_mem, self.batch_size, replace=False)
-        batch_index = np.arange(self.batch_size, dtype=np.int32)
-
-        state_batch = T.tensor(self.state_memory[batch]).to(self.Q_eval.device)
-        new_state_batch = T.tensor(
-                self.new_state_memory[batch]).to(self.Q_eval.device)
-        action_batch = self.action_memory[batch]
-        reward_batch = T.tensor(
-                self.reward_memory[batch]).to(self.Q_eval.device)
-        terminal_batch = T.tensor(
-                self.terminal_memory[batch]).to(self.Q_eval.device)
-
-        q_eval = self.Q_eval.forward(state_batch)[batch_index, action_batch]
-        q_next = self.Q_eval.forward(new_state_batch)
-        q_next[terminal_batch] = 0.0
-
-        q_target = reward_batch + self.gamma*T.max(q_next, dim=1)[0]
-
-        loss = self.Q_eval.loss(q_target, q_eval).to(self.Q_eval.device)
+        optimizer.zero_grad()
         loss.backward()
-        self.Q_eval.optimizer.step()
-
-        self.iter_cntr += 1
-        self.epsilon = self.epsilon - self.eps_dec \
-            if self.epsilon > self.eps_min else self.eps_min
+        optimizer.step()
 
 if __name__ == "__main__":
-    env = gym.make('CartPole-v1')
-    agent = Agent(gamma=0.99, epsilon=1.0, batch_size=64, n_actions=2, eps_end=0.01,
-                  input_dims=[8], lr=0.001)
-    scores, eps_history = [], []
-    n_games = 500
+    env = gym.make("CartPole-v1")
+    env = gym.wrappers.NumpyToTorch(env)
+    q = Qnet()
+    q_target = Qnet()
+    q_target.load_state_dict(q.state_dict())
+    memory = ReplayBuffer(
+        storage=LazyMemmapStorage(buffer_limit),
+        sampler=RandomSampler()
+    )
+    print_interval = 20
 
-    for i in range(n_games):
-        score = 0
+    score = 0.0
+    optimizer = optim.Adam(q.parameters(), lr=learning_rate)
+
+    for n_epi in range(10000):
+        eps = max(0.01, 0.08 - 0.01 * (n_epi / 200))  # Linear annealing from 8% to 1%
+        s, _ = env.reset()
         done = False
-        observation = env.reset()
+
         while not done:
-            action = agent.choose_action(observation)
-            observation_, reward, done, truncated, info = env.step(action)
-            score += reward
-            agent.store_transition(observation, action, reward,
-                                    observation_, done)
-            agent.learn()
-            observation = observation_
-        scores.append(score)
-        eps_history.append(agent.epsilon)
+            a = q.sample_action(s, eps)
+            s_prime, r, done, _, _ = env.step(a)
+            done_mask = 0.0 if done else 1.0
+            memory.add(TensorDict({
+                "s": s, "s_prime": s_prime, "r": r/100.0, "a": a, "done": done_mask
+            }))
+            s = s_prime
 
-        avg_score = np.mean(scores[-100:])
+            score += r
+            if done:
+                break
 
-        print('episode ', i, 'score %.2f' % score,
-                'average score %.2f' % avg_score,
-                'epsilon %.2f' % agent.epsilon)
-    x = [i+1 for i in range(n_games)]
-    filename = 'lunar_lander.png'
-    plotLearning(x, scores, eps_history, filename)
+        if len(memory) > 2000:
+            train(q, q_target, memory, optimizer)
+
+        if n_epi % print_interval == 0 and n_epi != 0:  # print interval is 20
+            q_target.load_state_dict(q.state_dict())
+            print(f"n_episode :{n_epi}, score : {score/print_interval:.1f}, " \
+                  f"n_buffer : {len(memory)}, epsilon : {eps*100:.1f}%")
+            score = 0.0
+
+    env.close()
