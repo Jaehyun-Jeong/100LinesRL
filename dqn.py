@@ -3,14 +3,40 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from tensordict import TensorDict
-from torchrl.data import ReplayBuffer, LazyMemmapStorage, RandomSampler
 
 # Hyperparameters
 learning_rate = 0.0005
 gamma = 0.98
 buffer_limit = 50000
 batch_size = 32
+
+class ReplayBuffer():
+    def __init__(self):
+        self.size = 0
+        self.s_lst = T.empty(0, 4)
+        self.a_lst = T.empty(0, 1)
+        self.r_lst = T.empty(0, 1)
+        self.s_prime_lst = T.empty(0, 4)
+        self.done_mask_lst = T.empty(0, 1)
+
+    def push(self, transition):  # Tensor Queue
+        s, a, r, s_prime, done_mask = transition
+        self.s_lst = T.cat((T.tensor(s).unsqueeze(0), self.s_lst), 0)[:buffer_limit]
+        self.a_lst = T.cat((T.tensor([a]).unsqueeze(0), self.a_lst), 0)[:buffer_limit]
+        self.r_lst = T.cat((T.tensor([r]).unsqueeze(0), self.r_lst), 0)[:buffer_limit]
+        self.s_prime_lst = T.cat((T.tensor(s_prime).unsqueeze(0), self.s_prime_lst), 0)[:buffer_limit]
+        self.done_mask_lst = T.cat((T.tensor([done_mask]).unsqueeze(0), self.done_mask_lst), 0)[:buffer_limit]
+        if self.size < buffer_limit:
+            self.size += 1
+
+    def sample(self, n):
+        idx = T.randperm(self.size)[:batch_size]
+
+        return self.s_lst[idx], self.a_lst[idx], self.r_lst[idx], \
+            self.s_prime_lst[idx], self.done_mask_lst[idx]
+
+    def __len__(self):
+        return int(self.s_lst.shape[0])
 
 class Qnet(nn.Module):
     def __init__(self):
@@ -31,14 +57,11 @@ class Qnet(nn.Module):
 
 def train(q, q_target, memory, optimizer):
     for i in range(10):
-        batch = memory.sample(batch_size).apply(
-            lambda x: x.unsqueeze(1) if x.ndim == 1 else x
-        )
-
-        q_out = q(batch["s"])
-        q_a = q_out.gather(1, batch["a"])
-        max_q_prime = q_target(batch["s_prime"]).max(1, True)[0]
-        target = batch["r"] + gamma * max_q_prime * batch["done"]
+        s, a, r, s_prime, done_mask = memory.sample(batch_size)
+        q_out = q(s)
+        q_a = q_out.gather(1, a)
+        max_q_prime = q_target(s_prime).max(1, True)[0]
+        target = r + gamma * max_q_prime * done_mask
         loss = F.smooth_l1_loss(q_a, target)
 
         optimizer.zero_grad()
@@ -51,10 +74,7 @@ if __name__ == "__main__":
     q = Qnet()
     q_target = Qnet()
     q_target.load_state_dict(q.state_dict())
-    memory = ReplayBuffer(
-        storage=LazyMemmapStorage(buffer_limit),
-        sampler=RandomSampler()
-    )
+    memory = ReplayBuffer()
     print_interval = 20
 
     score = 0.0
@@ -69,9 +89,7 @@ if __name__ == "__main__":
             a = q.sample_action(s, eps)
             s_prime, r, done, _, _ = env.step(a)
             done_mask = 0.0 if done else 1.0
-            memory.add(TensorDict({
-                "s": s, "s_prime": s_prime, "r": r/100.0, "a": a, "done": done_mask
-            }))
+            memory.push((s, a, r/100.0, s_prime, done_mask))
             s = s_prime
 
             score += r
