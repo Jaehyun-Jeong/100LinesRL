@@ -66,10 +66,7 @@ class PolicyNet(nn.Module):
         s, _, _, _, _ = mini_batch
         a, log_prob = self.forward(s)
         entropy = -self.log_alpha.exp() * log_prob
-
-        q1_val, q2_val = q1(s, a), q2(s, a)
-        q1_q2 = T.cat([q1_val, q2_val], dim=1)
-        min_q = T.min(q1_q2, 1, keepdim=True)[0]
+        min_q = T.min(q1(s, a), q2(s, a))
 
         loss = -min_q - entropy # for gradient ascent
         self.optimizer.zero_grad()
@@ -111,9 +108,7 @@ class QNet(nn.Module):
         s, a, r, s_prime, done = mini_batch
         a_prime, log_prob = pi(s_prime)
         entropy = -pi.log_alpha.exp() * log_prob
-        q1_val, q2_val = q1(s_prime, a_prime), q2(s_prime, a_prime)
-        q1_q2 = T.cat([q1_val, q2_val], dim=1)
-        min_q = T.min(q1_q2, 1, keepdim=True)[0]
+        min_q = T.min(q1(s_prime, a_prime), q2(s_prime, a_prime))
         target = r + gamma * done * (min_q + entropy)
 
         return target
