@@ -8,12 +8,6 @@ Inspired by [minimalRL](https://github.com/seungeunrho/minimalRL).
 
 * Length of each file is up to 100 lines of codes.
 
-* Every algorithm can be trained within 30 seconds, even without GPU.
-
-* Envs are fixed to "CartPole-v1". You can just focus on the implementations.
-
-
-
 ## Algorithms
 1. [DQN](https://github.com/jaehyun-jeong/100LinesRL/blob/master/dqn.py) (98 lines, including replay memory and target network)
 2. [PPO](https://github.com/jaehyun-jeong/100LinesRL/blob/master/ppo.py) (100 lines, including GAE)
