@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -36,20 +36,19 @@ class ActorCritic(nn.Module):
 def worker(worker_id, master_end, worker_end):
     master_end.close()  # Forbid worker to use the master end for messaging
     env = gym.make('CartPole-v1')
-    env.seed(worker_id)
 
     while True:
         cmd, data = worker_end.recv()
         if cmd == 'step':
             ob, reward, done, info = env.step(data)
             if done:
-                ob = env.reset()
+                ob = env.reset(seed=worker_id)
             worker_end.send((ob, reward, done, info))
         elif cmd == 'reset':
-            ob = env.reset()
+            ob = env.reset(seed=worker_id)
             worker_end.send(ob)
         elif cmd == 'reset_task':
-            ob = env.reset_task()
+            ob = env.reset_task(seed=worker_id)
             worker_end.send(ob)
         elif cmd == 'close':
             worker_end.close()
