@@ -61,6 +61,7 @@ class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
         self.fc1 = nn.Linear(
+            # prod means multiplying every value of shape (e.g. (81, 81, 3).prod == 81*81*3.
             np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape),
             256,
         )
@@ -98,6 +99,10 @@ if __name__ == "__main__":
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    '''Whether PyTorch's cuDNN backend uses deterministic
+    Same input -> Same output  
+    Results are reproducible across different runs
+    '''
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda_is_available() and args.cuda else "cpu")
@@ -133,11 +138,12 @@ if __name__ == "__main__":
     obs, _ = envs.reset(seed=args.seed)
     for global_step in range(args.total_timesteps):
         if global_step < args.learning_starts:
+            # Random actions before args.learning_starts
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
             with torch.no_grad():
                 actions = actor(torch.Tensor(obs).to(device))
-                actions += torch.normal(0, actor.action_scale * args.exploration_noise)
+                actions += torch.normal(0, actor.action_scale * args.exploration_noise)  # Smoothing q funciton
                 actions = actions.cpu().numpy().clip(envs.single_action_space.low, envs.single_action_space.high)
         
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
@@ -183,12 +189,13 @@ if __name__ == "__main__":
             qf_loss.backward()
             q_optimizer.step()
 
-            if global_step % args.policy_frequency == 0:
+            if global_step % args.policy_frequency == 0:  # Delayed Policy Update
                 actor_loss = -qf1(data.observations, actor(data.observations)).mean()
                 actor_optimizer.zero_grad()
                 actor_loss.backward()
                 actor_optimizer.step()
 
+                # Polyak averaging
                 for param, target_param in zip(actor.parameters(), target_actor.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
                 for param, target_param in zip(actor.parameters(), target_actor.parameters()):
