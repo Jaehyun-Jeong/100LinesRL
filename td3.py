@@ -44,7 +44,6 @@ if __name__ == "__main__":
     actor_target.load_state_dict(actor.state_dict())
     q_optimizer = T.optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=learning_rate)
     actor_optimizer = T.optim.Adam(list(actor.parameters()), lr=learning_rate)
-
     rb = ReplayBuffer()
 
     obs, _ = env.reset(seed=seed)
@@ -57,7 +56,7 @@ if __name__ == "__main__":
                 action = actor(T.Tensor(obs))
                 action += T.normal(0, action_scale * exploration_noise)  # Smoothing q funciton
                 action = action.cpu().numpy().clip(env.action_space.low, env.action_space.high)
-        
+
         next_obs, reward, done, _, _ = env.step(action)
         real_next_obs = next_obs.copy()
         score += reward
