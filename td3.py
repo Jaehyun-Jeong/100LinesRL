@@ -36,14 +36,15 @@ class PolicyNet(nn.Module):
 if __name__ == "__main__":
 
     env = gym.make('Pendulum-v1')
+
     actor = PolicyNet()
+    actor_target = PolicyNet()
+    actor_target.load_state_dict(actor.state_dict())
+    actor_optimizer = T.optim.Adam(list(actor.parameters()), lr=learning_rate)
     qf1, qf1_target, qf2, qf2_target = [QNet() for _ in range(4)]
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
-    actor_target = PolicyNet()
-    actor_target.load_state_dict(actor.state_dict())
     q_optimizer = T.optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=learning_rate)
-    actor_optimizer = T.optim.Adam(list(actor.parameters()), lr=learning_rate)
     rb = ReplayBuffer()
 
     obs, _ = env.reset(seed=seed)
