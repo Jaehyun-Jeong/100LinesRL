@@ -1,6 +1,8 @@
+from types import SimpleNamespace
 import gymnasium as gym, torch as T, torch.nn as nn, torch.nn.functional as F
 
-seed, learning_starts, total_timesteps, buffer_limit, batch_size, learning_rate, gamma, policy_noise, policy_frequency, noise_clip, action_scale, exploration_noise, tau = 0, 25e3, int(1e6), int(1e6), 256, 3e-4, 0.005, 0.1, 2, 0.5, T.tensor(2, dtype=T.float32), 0.1, 0.005
+q_lr, pi_lr, gamma, tau, pi_noise, noise_clip, pi_freq, exploration_noise = 3e-4, 3e-4, 0.98, 0.005, 0.1, 0.5, 2, 0.1
+seed, learning_starts, total_timesteps, buffer_limit, batch_size, action_scale = 0, 25e3, 1_000_000, 1_000_000, 256, T.tensor(2, dtype=T.float32)
 
 class ReplayBuffer:
     def __init__(self):
@@ -15,7 +17,7 @@ class ReplayBuffer:
 
     def sample(self, n):
         idx = T.randperm(len(self))[:n]
-        return {'s': self.s[idx], 'a': self.a[idx], 'r': self.r[idx], 'sp': self.sp[idx], 'done': self.d[idx]}
+        return SimpleNamespace(s=self.s[idx], a=self.a[idx], r=self.r[idx], sp=self.sp[idx], done=self.d[idx])
 
     def __len__(self): return self.s.shape[0]
 
@@ -34,17 +36,15 @@ class PolicyNet(nn.Module):
     def forward(self, x): return T.tanh(self.fc_mu(x))
 
 if __name__ == "__main__":
-
     env = gym.make('Pendulum-v1')
 
-    actor = PolicyNet()
-    actor_target = PolicyNet()
+    actor, actor_target = PolicyNet(), PolicyNet()
     actor_target.load_state_dict(actor.state_dict())
-    actor_optimizer = T.optim.Adam(list(actor.parameters()), lr=learning_rate)
+    actor_optimizer = T.optim.Adam(list(actor.parameters()), lr=pi_lr)
     qf1, qf1_target, qf2, qf2_target = [QNet() for _ in range(4)]
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
-    q_optimizer = T.optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=learning_rate)
+    q_optimizer = T.optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=q_lr)
     rb = ReplayBuffer()
 
     obs, _ = env.reset(seed=seed)
@@ -67,24 +67,24 @@ if __name__ == "__main__":
         if global_step > learning_starts:
             data = rb.sample(batch_size)
             with T.no_grad():
-                clipped_noise = (T.randn_like(data['a']) * policy_noise).clamp(
+                clipped_noise = (T.randn_like(data.a) * pi_noise).clamp(
                     -noise_clip, noise_clip
                 ) * action_scale
-                next_state_action = (actor_target(data['s']) + clipped_noise).clamp(
+                next_state_action = (actor_target(data.s) + clipped_noise).clamp(
                     env.action_space.low[0], env.action_space.high[0]
                 )
-                qf1_next_target, qf2_next_target = [q_target(data['s'], next_state_action) for q_target in [qf1_target, qf2_target]]
+                qf1_next_target, qf2_next_target = [q_target(data.s, next_state_action) for q_target in [qf1_target, qf2_target]]
                 min_qf_next_target = T.min(qf1_next_target, qf2_next_target)
-                next_q_value = (data['r'] + gamma * (1 - data['done']) * min_qf_next_target).view(-1)
-            qf1_a_value, qf2_a_value = [qf(data['sp'], data['a']).view(-1) for qf in [qf1, qf2]]
+                next_q_value = (data.r + gamma * (1 - data.done) * min_qf_next_target).view(-1)
+            qf1_a_value, qf2_a_value = [qf(data.sp, data.a).view(-1) for qf in [qf1, qf2]]
             qf_loss = F.mse_loss(qf1_a_value, next_q_value) + F.mse_loss(qf2_a_value, next_q_value)
 
             q_optimizer.zero_grad()
             qf_loss.backward()
             q_optimizer.step()
 
-            if global_step % policy_frequency == 0:  # Delayed Policy Update
-                actor_loss = -qf1(data['sp'], actor(data['sp'])).mean()
+            if global_step % pi_freq == 0:  # Delayed Policy Update
+                actor_loss = -qf1(data.sp, actor(data.sp)).mean()
                 actor_optimizer.zero_grad()
                 actor_loss.backward()
                 actor_optimizer.step()
@@ -97,4 +97,4 @@ if __name__ == "__main__":
             if global_step % 20 == 0:
                 print(f"# of step:{global_step}, avg score : {score/20:1f}")
                 score = 0.0
-    envs.close()
+    env.close()
