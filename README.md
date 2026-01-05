@@ -17,7 +17,7 @@ Inspired by [minimalRL](https://github.com/seungeunrho/minimalRL).
 ## Algorithms
 1. [DQN](https://github.com/jaehyun-jeong/100LinesRL/blob/master/dqn.py) (98 lines, including replay memory and target network)
 2. [PPO](https://github.com/jaehyun-jeong/100LinesRL/blob/master/ppo.py) (100 lines, including GAE)
-3. [SAC](https://github.com/jaehyun-jeong/100LinesRL/blob/master/sac.py) (100 lines)
+3. [SAC](https://github.com/jaehyun-jeong/100LinesRL/blob/master/sac.py) (99 lines)
 4. [TD3](https://github.com/jaehyun-jeong/100LinesRL/blob/master/td3.py) (100 lines)
 
 ## Dependencies
