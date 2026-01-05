@@ -2,7 +2,7 @@ import gymnasium as gym, torch as T, torch.nn as nn, torch.nn.functional as F
 from torch.distributions import Normal
 from types import SimpleNamespace
 
-lr_pi, lr_q, lr_alpha, gamma, tau = 0.0005, 0.001, 0.001. 0.98, 0.01
+lr_pi, lr_q, lr_alpha, gamma, tau = 0.0005, 0.001, 0.001, 0.98, 0.01
 batch_size, buffer_limit, init_alpha, target_entropy = 32, 50000, 0.01, -1.0
 
 class ReplayBuffer:
