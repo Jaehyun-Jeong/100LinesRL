@@ -94,7 +94,7 @@ if __name__ == "__main__":
                     for param, param_target in zip(nn.parameters(), nn_target.parameters()):
                         param_target.data.copy_(tau * param.data + (1 - tau) * param_target.data)
 
-            if global_step % 20 == 0:
+            if global_step % 100 == 0:
                 print(f"# of step:{global_step}, avg score : {score/20:1f}")
                 score = 0.0
     env.close()
