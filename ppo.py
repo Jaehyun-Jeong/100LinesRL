@@ -1,6 +1,7 @@
 import gymnasium as gym, gymnasium.wrappers as wrappers, torch as T, torch.nn as nn, torch.nn.functional as F, torch.optim as optim, numpy as np, ppo_config as conf, shimmy
 from torch.distributions import Categorical, Normal
 from tqdm import tqdm
+from plot import save_gif
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     nn.init.orthogonal_(layer.weight, std)
@@ -84,6 +85,7 @@ if __name__ == '__main__':
     envs, cts, s_dim, a_dim = make_envs(conf.env_name, conf.n_envs)
     model, total_step = PPO(s_dim, a_dim, cts), conf.max_timesteps // conf.n_envs
     s, score, n_epi, print_interval = envs.reset()[0], 0.0, 0, 20
+    best_score = -np.inf
     for n_step in tqdm(range(total_step), unit_scale=conf.n_envs, unit="step"):
         model.optimizer.param_groups[0]['lr'] = lr = conf.lr * (1 - n_step / total_step)
         a, a_in, log_prob, _ = model.pi(T.from_numpy(s).float().to(conf.device))
@@ -94,6 +96,9 @@ if __name__ == '__main__':
             for i in np.where(info["_episode"])[0]:
                 score += float(np.array(info["episode"]["r"][i]).item())
                 if (n_epi := n_epi + 1) % print_interval == 0:
+                    if best_score < (score / print_interval):
+                        best_score = (score / print_interval)
+                        save_gif(model, envs, conf.env_name, filename=f"ppo_{conf.env_name.split('/')[-1]}_step_{n_step}.gif")
                     tqdm.write(f"step {(n_step+1)*conf.n_envs} episode {n_epi} avg score {score/print_interval:.1f} lr {lr:.6f}")
                     score = 0.0
         if (n_step+1) % conf.T_horizon == 0: model.train_net()
