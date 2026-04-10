@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault("MUJOCO_GL", "egl")   # headless MuJoCo/DM Control rendering
+
 import torch as T
 import argparse
 
