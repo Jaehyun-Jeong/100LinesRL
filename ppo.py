@@ -98,7 +98,7 @@ if __name__ == '__main__':
                 if (n_epi := n_epi + 1) % print_interval == 0:
                     if best_score < (score / print_interval):
                         best_score = (score / print_interval)
-                        save_gif(model, envs, conf.env_name, filename=f"ppo_{conf.env_name.split('/')[-1]}_step_{n_step}.gif")
+                        save_gif(model, envs, conf.env_name, filename=f"ppo_{conf.env_name.split('/')[-1]}.gif")
                     tqdm.write(f"step {(n_step+1)*conf.n_envs} episode {n_epi} avg score {score/print_interval:.1f} lr {lr:.6f}")
                     score = 0.0
         if (n_step+1) % conf.T_horizon == 0: model.train_net()
